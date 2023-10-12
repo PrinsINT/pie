@@ -5,13 +5,13 @@ import os
 from datetime import datetime
 import logging
 
-import pie
+# import pie
 from pie.settings import settings_from_file
 from pie.trainer import Trainer
-from pie import initialization
+import pie.initialization
 from pie.data import Dataset, Reader, MultiLabelEncoder
 from pie.models import SimpleModel, get_pretrained_embeddings
-from pie import optimize
+import pie.optimize
 
 # set seeds
 import random
