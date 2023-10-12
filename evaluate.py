@@ -1,8 +1,7 @@
 # Can be run with python -m pie.scripts.evaluate
 import os.path
-from pie import utils
 
-
+import pie.utils
 from pie.models import BaseModel
 from pie.data import Dataset, Reader
 from pie.settings import load_default_settings, settings_from_file
