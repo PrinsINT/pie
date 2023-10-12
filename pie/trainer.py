@@ -15,6 +15,8 @@ from torch import optim
 from torch.nn.utils import clip_grad_norm_
 
 logging.basicConfig(format='%(asctime)s : %(message)s', level=logging.INFO)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 
 def get_batch_task(tasks, **kwargs):
@@ -319,7 +321,7 @@ class Trainer(object):
                 rep = ""
                 for t in sorted(rep_loss):
                     rep += '{}:{:.4f}  '.format(t, rep_loss[t] / rep_batches[t])
-                logging.info("Batch [{}/{}] || {} || {:.0f} w/s".format(
+                logger.info("Batch [{}/{}] || {} || {:.0f} w/s".format(
                     b, self.num_batches, rep, rep_items / (time.time() - rep_start)))
                 rep_loss = collections.defaultdict(float)
                 rep_batches = collections.defaultdict(int)
@@ -329,7 +331,7 @@ class Trainer(object):
                 if devset is not None:
                     rep_start = time.time()
                     scores = self.run_check(devset)
-                    logging.info("Evaluation time: {:.0f} sec".format(
+                    logger.info("Evaluation time: {:.0f} sec".format(
                         time.time() - rep_start))
                     rep_start = time.time()
 
@@ -346,20 +348,20 @@ class Trainer(object):
             for epoch in range(1, epochs + 1):
                 # train epoch
                 epoch_start = time.time()
-                logging.info("Starting epoch [{}]".format(epoch))
+                logger.info("Starting epoch [{}]".format(epoch))
                 self.train_epoch(devset, epoch)
                 epoch_total = time.time() - epoch_start
-                logging.info("Finished epoch [{}] in [{:.0f}] secs".format(
+                logger.info("Finished epoch [{}] in [{:.0f}] secs".format(
                     epoch, epoch_total))
 
         except EarlyStopException as e:
-            logging.info("Early stopping training: "
+            logger.info("Early stopping training: "
                          "task [{}] with best score {:.4f}".format(e.task, e.loss))
 
             self.model.load_state_dict(e.best_state_dict)
             scores = {e.task: e.loss}
 
-        logging.info("Finished training in [{:.0f}] secs".format(time.time() - start))
+        logger.info("Finished training in [{:.0f}] secs".format(time.time() - start))
 
         # will be None if no dev test was provided or the model failed to converge
         return scores
