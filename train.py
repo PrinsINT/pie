@@ -155,8 +155,7 @@ def run(settings):
     except KeyboardInterrupt:
         print("Stopping training")
     finally:
-        pass
-        # model.eval()
+        model.eval()
     running_time = time.time() - running_time
 
     if settings.test_path:
