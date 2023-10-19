@@ -148,12 +148,16 @@ class TabReader(BaseReader):
                 return tuple(header)
 
             else:
-                # move to first non empty line
-                line = next(f).strip()
-                while not line:
-                    line = next(f).strip()
+                # Move to first non empty line
+                # E.g.: "\n" -> len(tasks) == 0
+                # E.g.: "a \t \t \n" -> len(tasks) == 2
+                # The latter occurs when lemma or pos are undefined
+                while True:
+                    line = next(f)
+                    _, *tasks = line.split(self.sep)
+                    if len(tasks) > 0:
+                        break
 
-                _, *tasks = line.split(self.sep)
                 if len(tasks) == 0:
                     raise ValueError("Not enough input tasks: [{}]".format(self.fpath))
 
