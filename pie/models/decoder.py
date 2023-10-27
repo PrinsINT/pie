@@ -331,7 +331,8 @@ class AttentionalDecoder(nn.Module):
         mask = torch.ones(batch, dtype=torch.int64, device=device)
         inp = torch.zeros(batch, dtype=torch.int64, device=device) + bos
         hyps, scores = [], 0
-
+        # Override max_seq_len to fix truncated pos tags
+        max_seq_len = len(max(self.label_encoder.known_tokens, key=len))
         for _ in range(max_seq_len):
             if mask.sum().item() == 0:
                 break
