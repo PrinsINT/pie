@@ -32,6 +32,7 @@ if __name__ == '__main__':
     parser.add_argument('--lower', action='store_true')
     parser.add_argument('--max_sent_len', type=int, default=35)
     parser.add_argument('--vrt', action='store_true')
+    parser.add_argument('--tokenize', action='store_true')
     args = parser.parse_args()
 
     run(args.model_spec, args.input_path,
@@ -39,4 +40,4 @@ if __name__ == '__main__':
         keep_boundaries=args.keep_boundaries,
         device=args.device, batch_size=args.batch_size,
         lower=args.lower, max_sent_len=args.max_sent_len,
-        vrt=args.vrt)
+        vrt=args.vrt, tokenize=args.tokenize)
