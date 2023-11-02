@@ -85,8 +85,9 @@ def lines_from_file(fpath, tokenize=False, max_sent_len=35, vrt=False):
     if tokenize:
         # ignore vrt
         with open(fpath) as f:
-            for sent in simple_tokenizer(line):
-                yield sent, len(sent)
+            for line in f:
+                for sent in simple_tokenizer(line):
+                    yield sent, len(sent)
     else:
         for sent in get_sentences(fpath, max_sent_len, vrt):
             yield sent, len(sent)
