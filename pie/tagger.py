@@ -23,7 +23,7 @@ def regexsplitter(regex):
 
 SECTION = r'([A-Z\. ]+\.)'
 FULLSTOP = r'([^\.]+\.)'
-WORD = r'([{}])'.format(string.punctuation)
+WORD = r'([{}])'.format(string.punctuation.replace("-", "").replace("'", "").replace("[", "").replace("]", ""))
 
 
 def simple_tokenizer(text):
