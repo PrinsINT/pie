@@ -107,7 +107,7 @@ class TabReader(BaseReader):
                 self.tasks, self.sep, self.breakline_ref, self.breakline_data, self)
 
             for line_num, line in enumerate(f):
-                line = line.strip()
+                line = line.strip("\r\n")
 
                 # Empty line as chunk break
                 if not line and len(parser.inp) > 0:
