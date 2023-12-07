@@ -25,15 +25,21 @@ SECTION = r'([A-Z\. ]+\.)'
 FULLSTOP = r'([^\.]+\.)'
 WORD = r'([{}])'.format(string.punctuation.replace("-", "").replace("'", "").replace("[", "").replace("]", ""))
 
-
-def simple_tokenizer(text):
+# Even the tokenizer needs to adhere to the max_sent_len, 
+# as it can cause out of memory errors.
+def simple_tokenizer(text, max_sent_len):
     section = regexsplitter(SECTION)
     fullstop = regexsplitter(FULLSTOP)
     word = regexsplitter(WORD)
 
     for line in section(text):
         for sent in fullstop(line):
-            yield [w for raw in sent.split() for w in word(raw)]
+            sent = [w for raw in sent.split() for w in word(raw)]
+            while len(sent) > max_sent_len:
+                yield sent[:max_sent_len]
+                sent = sent[max_sent_len:]
+            if sent:
+                yield sent
 
 
 def get_sentences_vrt(fpath, max_sent_len):
@@ -80,13 +86,13 @@ def get_sentences(fpath, max_sent_len, vrt):
 def lines_from_file(fpath, tokenize=False, max_sent_len=35, vrt=False):
     """
     tokenize : bool, whether to use simple_tokenizer
-    max_sent_len : int, only applicable if tokenize is False
+    max_sent_len : int
     """
     if tokenize:
         # ignore vrt
         with open(fpath) as f:
             for line in f:
-                for sent in simple_tokenizer(line):
+                for sent in simple_tokenizer(line, max_sent_len):
                     yield sent, len(sent)
     else:
         for sent in get_sentences(fpath, max_sent_len, vrt):
