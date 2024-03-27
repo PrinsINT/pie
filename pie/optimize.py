@@ -134,7 +134,7 @@ def run_optimize(train_fn, settings, opt, n_iter, **kwargs):
     model_pool: list[tuple[Any, float, str]] = []
     for _ in range(INIT_POP):
         tmp = sample_from_config(opt)
-        model_pool.append((tmp, 0.0, ""))
+        model_pool.append((tmp, 0, ""))
     generation = 0
 
     while len(model_pool) > 0:
@@ -152,19 +152,32 @@ def run_optimize(train_fn, settings, opt, n_iter, **kwargs):
                 merged.existing_model = model[2]
             print("::: Sampled settings :::")
             print(yaml.dump(dict(merged)))
-            model_path, scoring = train_fn(check_settings(merge_task_defaults(merged)), **kwargs)
-            model_pool[i] = (model[0], scoring[0]['all']['accuracy'], model_path)
+            try:
+                model_path, scoring = train_fn(check_settings(merge_task_defaults(merged)), **kwargs)
+                model_pool[i] = (model[0], scoring[0]['all']['accuracy'], model_path)
+            except Exception as e:
+                print(f"::: Exception in run {i+1} of generation {generation}, continuing anyway :::\n{e}")
         
         print(f"::: Best score in generation {generation}: {model_pool[0][1]} :::")
 
         if len(model_pool) == 1:
             break
+        # sort by score
         model_pool = sorted(model_pool, key=lambda x: x[1], reverse=True)
+        # remove worst half
         to_be_removed = model_pool[len(model_pool) // HALVING:]
+        # keep best half
+        model_pool = model_pool[:len(model_pool) // HALVING]
+        # additionally remove any models from the model_pool whose score near zero
+        THRESHOLD_SCORE = 0.01
+        to_be_removed += [model for model in model_pool if model[1] <= THRESHOLD_SCORE]
+        model_pool = [model for model in model_pool if model[1] > THRESHOLD_SCORE]        
+        # actually remove the models files
         print(f"Removing {len(to_be_removed)} models")
         for model in to_be_removed:
-            os.remove(model[2])
-        model_pool = model_pool[:len(model_pool) // HALVING]
+            if model[2] != "": # due to an exception, the model might not have been saved
+                os.remove(model[2])
+        
         generation += 1
 
 
