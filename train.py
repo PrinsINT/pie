@@ -5,13 +5,17 @@ import os
 from datetime import datetime
 import logging
 
+from sklearn.manifold import locally_linear_embedding
+
 # import pie
+from pie.models.base_model import BaseModel
 from pie.settings import settings_from_file
 from pie.trainer import Trainer
-import pie.initialization
+import pie.initialization as initialization
 from pie.data import Dataset, Reader, MultiLabelEncoder
 from pie.models import SimpleModel, get_pretrained_embeddings
-import pie.optimize
+import pie.optimize as optimize
+import pie
 
 # set seeds
 import random
@@ -56,30 +60,39 @@ def run(settings):
             print("- {}".format(task))
         print()
 
-    # label encoder
-    label_encoder = MultiLabelEncoder.from_settings(settings, tasks=tasks)
-    if settings.verbose:
-        print("::: Fitting data :::")
-        print()
-    label_encoder.fit_reader(reader)
+    # load existing model
+    model = None
+    label_encoder = None
+    if settings.existing_model:
+        print(f"::: Loading existing model from {settings.existing_model} :::")
+        model = BaseModel.load(settings.existing_model)
+        label_encoder = model.label_encoder
 
-    if settings.verbose:
-        print()
-        print("::: Vocabulary :::")
-        print()
-        types = '{}/{}={:.2f}'.format(*label_encoder.word.get_type_stats())
-        tokens = '{}/{}={:.2f}'.format(*label_encoder.word.get_token_stats())
-        print("- {:<15} types={:<10} tokens={:<10}".format("word", types, tokens))
-        types = '{}/{}={:.2f}'.format(*label_encoder.char.get_type_stats())
-        tokens = '{}/{}={:.2f}'.format(*label_encoder.char.get_token_stats())
-        print("- {:<15} types={:<10} tokens={:<10}".format("char", types, tokens))
-        print()
-        print("::: Tasks :::")
-        print()
-        for task, le in label_encoder.tasks.items():
-            print("- {:<15} target={:<6} level={:<6} vocab={:<6}"
-                  .format(task, le.target, le.level, len(le)))
-        print()
+    if label_encoder is None:
+        # label encoder
+        label_encoder = MultiLabelEncoder.from_settings(settings, tasks=tasks)
+        if settings.verbose:
+            print("::: Fitting data :::")
+            print()
+        label_encoder.fit_reader(reader)
+
+        if settings.verbose:
+            print()
+            print("::: Vocabulary :::")
+            print()
+            types = '{}/{}={:.2f}'.format(*label_encoder.word.get_type_stats())
+            tokens = '{}/{}={:.2f}'.format(*label_encoder.word.get_token_stats())
+            print("- {:<15} types={:<10} tokens={:<10}".format("word", types, tokens))
+            types = '{}/{}={:.2f}'.format(*label_encoder.char.get_type_stats())
+            tokens = '{}/{}={:.2f}'.format(*label_encoder.char.get_token_stats())
+            print("- {:<15} types={:<10} tokens={:<10}".format("char", types, tokens))
+            print()
+            print("::: Tasks :::")
+            print()
+            for task, le in label_encoder.tasks.items():
+                print("- {:<15} target={:<6} level={:<6} vocab={:<6}"
+                    .format(task, le.target, le.level, len(le)))
+            print()
 
     trainset = Dataset(settings, reader, label_encoder)
 
@@ -89,47 +102,50 @@ def run(settings):
     else:
         logging.warning("No devset: cannot monitor/optimize training")
 
-    # model
-    model = SimpleModel(
-        label_encoder, settings.tasks,
-        settings.wemb_dim, settings.cemb_dim, settings.hidden_size,
-        settings.num_layers, cell=settings.cell,
-        # dropout
-        dropout=settings.dropout, word_dropout=settings.word_dropout,
-        # word embeddings
-        merge_type=settings.merge_type, cemb_type=settings.cemb_type,
-        cemb_layers=settings.cemb_layers, custom_cemb_cell=settings.custom_cemb_cell,
-        # lm joint loss
-        include_lm=settings.include_lm, lm_shared_softmax=settings.lm_shared_softmax,
-        # decoder
-        scorer=settings.scorer, linear_layers=settings.linear_layers)
+    if not settings.existing_model:
+        # model
+        model = SimpleModel(
+            label_encoder, settings.tasks,
+            settings.wemb_dim, settings.cemb_dim, settings.hidden_size,
+            settings.num_layers, cell=settings.cell,
+            # dropout
+            dropout=settings.dropout, word_dropout=settings.word_dropout,
+            # word embeddings
+            merge_type=settings.merge_type, cemb_type=settings.cemb_type,
+            cemb_layers=settings.cemb_layers, custom_cemb_cell=settings.custom_cemb_cell,
+            # lm joint loss
+            include_lm=settings.include_lm, lm_shared_softmax=settings.lm_shared_softmax,
+            # decoder
+            scorer=settings.scorer, linear_layers=settings.linear_layers)
 
-    # pretrain(/load pretrained) embeddings
-    if model.wemb is not None:
-        if settings.pretrain_embeddings:
-            print("Pretraining word embeddings")
-            wemb_reader = Reader(
-                settings, settings.input_path, settings.dev_path, settings.test_path)
-            weight = get_pretrained_embeddings(
-                wemb_reader, label_encoder, size=settings.wemb_dim,
-                window=5, negative=5, min_count=1)
-            model.wemb.weight.data = torch.tensor(weight, dtype=torch.float32)
+        # pretrain(/load pretrained) embeddings
+        if model.wemb is not None:
+            if settings.pretrain_embeddings:
+                print("Pretraining word embeddings")
+                wemb_reader = Reader(
+                    settings, settings.input_path, settings.dev_path, settings.test_path)
+                weight = get_pretrained_embeddings(
+                    wemb_reader, label_encoder, vector_size=settings.wemb_dim,
+                    window=5, negative=5, min_count=1)
+                model.wemb.weight.data = torch.tensor(weight, dtype=torch.float32)
 
-        elif settings.load_pretrained_embeddings:
-            print("Loading pretrained embeddings")
-            if not os.path.isfile(settings.load_pretrained_embeddings):
-                print("Couldn't find pretrained eembeddings in: {}".format(
-                    settings.load_pretrained_embeddings))
-            initialization.init_pretrained_embeddings(
-                settings.load_pretrained_embeddings, label_encoder.word, model.wemb)
+            elif settings.load_pretrained_embeddings:
+                print("Loading pretrained embeddings")
+                if not os.path.isfile(settings.load_pretrained_embeddings):
+                    print("Couldn't find pretrained eembeddings in: {}".format(
+                        settings.load_pretrained_embeddings))
+                initialization.init_pretrained_embeddings(
+                    settings.load_pretrained_embeddings, label_encoder.word, model.wemb)
 
-    # load pretrained weights
-    if settings.load_pretrained_encoder:
-        model.init_from_encoder(pie.Encoder.load(settings.load_pretrained_encoder))
+        # load pretrained weights
+        if settings.load_pretrained_encoder:
+            model.init_from_encoder(pie.Encoder.load(settings.load_pretrained_encoder))
 
-    # freeze embeddings
-    if settings.freeze_embeddings:
-        model.wemb.weight.requires_grad = False
+        # freeze embeddings
+        if settings.freeze_embeddings:
+            model.wemb.weight.requires_grad = False
+        
+    ### At this point the model has been initialized and is ready to be trained ###
 
     model.to(settings.device)
 
@@ -151,6 +167,7 @@ def run(settings):
     trainer = Trainer(settings, model, trainset, reader.get_nsents())
     scores = None
     try:
+        model.train()
         scores = trainer.train_epochs(settings.epochs, devset=devset)
     except KeyboardInterrupt:
         print("Stopping training")
@@ -170,12 +187,14 @@ def run(settings):
         fpath = model.save(fpath, infix=infix, settings=settings)
         print("Saved best model to: [{}]".format(fpath))
 
+    scoring = []
     if devset is not None and not settings.run_test:
         scorers = model.evaluate(devset, trainset)
         scores = []
         for task in sorted(scorers):
             scorer = scorers[task]
             result = scorer.get_scores()
+            scoring.append(result)
             for acc in result:
                 scores.append('{}-{}:{:.6f}'.format(
                     acc, task, result[acc]['accuracy']))
@@ -189,6 +208,7 @@ def run(settings):
             f.write('{}\n'.format('\t'.join(line)))
 
     print("Bye!")
+    return (fpath, scoring)
 
 
 if __name__ == "__main__":

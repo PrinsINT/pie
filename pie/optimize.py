@@ -1,6 +1,8 @@
 
+import os
 import random
 import json
+from typing import Any
 
 import yaml
 from json_minify import json_minify
@@ -126,16 +128,44 @@ def run_optimize(train_fn, settings, opt, n_iter, **kwargs):
 
     - n_iter: int, number of iterations to run
     """
-    for i in range(n_iter):
-        print()
-        print("::: Starting optimization run {} :::".format(i + 1))
-        print()
-        sampled = sample_from_config(opt)
-        merged = Settings(
-            utils.recursive_merge(dict(settings), sampled, overwrite=True))
-        print("::: Sampled settings :::")
-        print(yaml.dump(dict(merged)))
-        train_fn(check_settings(merge_task_defaults(merged)), **kwargs)
+    HALVING = 3
+    ROUNDS = 3
+    INIT_POP = ROUNDS * HALVING
+    model_pool: list[tuple[Any, float, str]] = []
+    for _ in range(INIT_POP):
+        tmp = sample_from_config(opt)
+        model_pool.append((tmp, 0.0, ""))
+    generation = 0
+
+    while len(model_pool) > 0:
+        for i, model in enumerate(model_pool):
+            resources = HALVING ** generation
+            print()
+            print(f"::: Model pool of size: {len(model_pool)}, generation: {generation}, resources per model: {resources} :::")
+            print()
+            print(f"::: Starting optimization run {i+1} of generation {generation} :::")
+            print()
+            sampled = model[0]
+            merged = Settings(utils.recursive_merge(dict(settings), sampled, overwrite=True))
+            merged.epochs = resources
+            if model[2] != "":
+                merged.existing_model = model[2]
+            print("::: Sampled settings :::")
+            print(yaml.dump(dict(merged)))
+            model_path, scoring = train_fn(check_settings(merge_task_defaults(merged)), **kwargs)
+            model_pool[i] = (model[0], scoring[0]['all']['accuracy'], model_path)
+        
+        print(f"::: Best score in generation {generation}: {model_pool[0][1]} :::")
+
+        if len(model_pool) == 1:
+            break
+        model_pool = sorted(model_pool, key=lambda x: x[1], reverse=True)
+        to_be_removed = model_pool[len(model_pool) // HALVING:]
+        print(f"Removing {len(to_be_removed)} models")
+        for model in to_be_removed:
+            os.remove(model[2])
+        model_pool = model_pool[:len(model_pool) // HALVING]
+        generation += 1
 
 
 if __name__ == '__main__':
