@@ -165,10 +165,10 @@ def run(settings):
 
     running_time = time.time()
     trainer = Trainer(settings, model, trainset, reader.get_nsents())
-    scores = None
+    loss = None
     try:
         model.train()
-        scores = trainer.train_epochs(settings.epochs, devset=devset)
+        loss = trainer.train_epochs(settings.epochs, devset=devset)
     except KeyboardInterrupt:
         print("Stopping training")
     finally:
@@ -183,7 +183,7 @@ def run(settings):
 
     # save model
     fpath, infix = get_fname_infix(settings)
-    if not settings.run_test:
+    if not settings.run_test and settings.modelpath != "":
         fpath = model.save(fpath, infix=infix, settings=settings)
         print("Saved best model to: [{}]".format(fpath))
 
