@@ -168,7 +168,7 @@ def run(settings):
     loss = None
     try:
         model.train()
-        loss = trainer.train_epochs(settings.epochs, devset=devset)
+        _, loss = trainer.train_epochs(settings.epochs, devset=devset)
     except KeyboardInterrupt:
         print("Stopping training")
     finally:
@@ -208,7 +208,7 @@ def run(settings):
             f.write('{}\n'.format('\t'.join(line)))
 
     print("Bye!")
-    return (fpath, scoring)
+    return (fpath, loss)
 
 
 if __name__ == "__main__":

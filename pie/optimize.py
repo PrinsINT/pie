@@ -136,68 +136,80 @@ def run_optimize(train_fn, settings, opt, n_iter, **kwargs):
     bayesian_hyperband(train_fn, settings, opt, kwargs)
 
 
+### TODO
+### save all configurations and scores in a json file
+
 # https://arxiv.org/pdf/1801.01596.pdf
+# https://arxiv.org/pdf/1603.06560.pdf
 # https://medium.com/@sabrinaherbst/automl-with-successive-halfing-and-hyperband-e130a05dded9
-def bayesian_hyperband(train_fn, settings, opt, kwargs, R=9, eta=3):
+def bayesian_hyperband(train_fn, settings, opt, kwargs, R=81, eta=3):
     s_max = math.floor(math.log(R, eta))
     B = (s_max + 1) * R
     result = (0, {})
-    bayes = [
-        BayesianOptimization(
-            f=None,
-            pbounds=get_bounds(),
-            verbose=2,
-            random_state=1,
-        )
-        for _ in range(s_max + 1)
-    ]
+    bayes = BayesianOptimization(
+        f=None,
+        pbounds=get_bounds(),
+        verbose=2,
+        random_state=1,
+        allow_duplicate_points=True,
+    )
 
     for s in reversed(range(s_max + 1)):
         n = math.ceil((B / R) * ((eta**s) / (s + 1)))
         r = R * (eta ** (-s))
         print(f"+++ Starting bracket {s} with {n} configurations and {r} resources +++")
-
+        T: list[dict] = []
+        loss_threshold = 0
         # successive halving
         for i in range(s + 1):
-            n_i = math.floor(n * (eta ** (-i)))
-            r_i = r * (eta**i)
+            n_i = math.floor(n * (eta ** (-i))) if i == 0 else len(T)
+            r_i = r * (eta**i) if i == 0 else math.ceil(R/n_i)
             L: list[float] = []
 
-            if i == 0:
-                T: list[dict] = []
-                for t in range(n_i):
-                    config = bayes[i].suggest(utility)
+            # 1st iter: we initialize the configurations
+            # first bracket: random
+            # other brackets: modelled by the GP
+            for t in range(n_i):
+                if i == 0:
+                    config = bayes.suggest(utility)
                     print(f"+++ suggested: {to_pie_config(config)} +++")
-                    print(
-                        f"+++ Run {t+1} of {n_i} with {r_i} resources in bracket {s}, halving {i+1}/{s+1} +++"
-                    )
-                    loss = single_run(config, r_i, train_fn, settings, opt, kwargs)
-                    L.append(loss)
                     T.append(config)
-                    bayes[i].register(params=config, target=loss)
-            else:
-                for t_i, t in enumerate(T):
-                    print(
-                        f"+++ Run {t_i+1} of {n_i} with {r_i} resources in bracket {s}, halving {i+1}/{s+1} +++"
-                    )
-                    loss = single_run(t, r_i, train_fn, settings, opt, kwargs)
-                    L.append(loss)
-                    bayes[i].register(params=t, target=loss)
-            L, T = top_k(T, L, math.floor(n_i / eta))
+                print(f"+++ Bracket {s} (h{i+1}/{s+1}) (r{t+1}/{n_i}) (b{r_i})+++")
+                loss = single_run(config, r_i, train_fn, settings, opt, kwargs)
+                L.append(loss)
+                if i != 0 or s != s_max:
+                    print(f"+++ Registering score {L[t]} +++")
+                    bayes.register(params=T[t], target=L[t])
+            if i == 0 and s == s_max:
+                # Only register the configs AFTER we ran them all.
+                # Intermediate registration changes the GP, so it won't be random.
+                for t in range(n_i):
+                    print(f"+++ Registering score {L[t]} +++")
+                    bayes.register(params=T[t], target=L[t])
+
+            L, T, loss_threshold = top_k(T, L, math.floor(n_i / eta), loss_threshold)
         if L[0] > result[0]:
             result = (L[0], T[0])
             print(f"+++ New best found in bracket {s}: {result} +++")
     return result
 
 
-def top_k(T, L, n) -> tuple[list[float], list[dict]]:
+def top_k(T, L, n, loss_threshold) -> tuple[list[float], list[dict], float]:
     if n >= len(T) or n == 0:
-        return L, T
-    print(f"+++ Keeping best {n} configurations +++")
+        return L, T, loss_threshold
     sorted_pairs = [
         (l, t) for l, t in sorted(zip(L, T), reverse=True, key=lambda x: x[0])
     ][:n]
-    return [l for l, _ in sorted_pairs], [t for _, t in sorted_pairs]
+    print(f"+++ Keeping {n} configurations +++")
+    # filter out the pairs that are below the average threshold
+    loss_threshold = (loss_threshold + max(L))/2 if loss_threshold != 0 else max(L)+min(L)/2
+    print(f"+++ Loss threshold: {loss_threshold} +++")
+    good_pairs = [pair for pair in sorted_pairs if pair[0] >= loss_threshold]
+    print(f"+++ Keeping best {len(good_pairs)} configurations +++")
+    new_L = [l for l, _ in good_pairs]
+    new_T = [t for _, t in good_pairs]
+    avg_loss = sum(new_L) / len(new_L)
+    return new_L, new_T, avg_loss
 
 
 def single_run(t, r_i, train_fn, settings, opt, kwargs) -> float:
@@ -208,8 +220,8 @@ def single_run(t, r_i, train_fn, settings, opt, kwargs) -> float:
         )
         merged.epochs = int(r_i)
         merged.modelpath = ""
-        _, scoring = train_fn(check_settings(merge_task_defaults(merged)), **kwargs)
-        final_score = scoring[0]["all"]["accuracy"]
+        path, loss = train_fn(check_settings(merge_task_defaults(merged)), **kwargs)
+        final_score = -loss["lemma"]  # negative because we want to maximize
         return final_score
     except Exception as e:
         print(f"+++ Exception in single_run: {e} +++")
@@ -219,37 +231,82 @@ def single_run(t, r_i, train_fn, settings, opt, kwargs) -> float:
 def to_pie_config(t):
     pie_config = {}
     # set pie_config.default to zero
-    pie_config["init_rnn"] = multi_choice(
-        t["init_rnn"], ["xavier_uniform", "orthogonal"]
-    )
-    pie_config["cell"] = multi_choice(t["cell"], ["LSTM", "GRU"])
-    pie_config["scorer"] = multi_choice(t["scorer"], ["general", "dot", "bahdanau"])
-    pie_config["hidden_size"] = pie_int(t["hidden_size"])
-    pie_config["num_layers"] = pie_int(t["num_layers"])
-    pie_config["linear_layers"] = pie_int(t["linear_layers"])
-    pie_config["cemb_layers"] = pie_int(t["cemb_layers"])
+    pie_config["include_lm"] = to_bool(t["include_lm"])
+    pie_config["lm_shared_softmax"] = to_bool(t["lm_shared_softmax"])
+
+    pie_config["lm_schedule"] = {}
+    pie_config["lm_schedule"]["patience"] = to_int(t["lm_patience"])
+    pie_config["lm_schedule"]["factor"] = to_int(t["lm_factor"])
+    pie_config["lm_schedule"]["weight"] = to_int(t["lm_weight"])
+
+    pie_config["batch_size"] = to_int(t["batch_size"])
+    pie_config["pretrain_embeddings"] = to_bool(t["pretrain_embeddings"])
+    pie_config["freeze_embeddings"] = to_bool(t["freeze_embeddings"])
+    pie_config["dropout"] = t["dropout"]
+    pie_config["word_dropout"] = t["word_dropout"]
+    pie_config["optimizer"] = to_choice(t["optimizer"], ["Adadelta","Adagrad","Adam","AdamW","Adamax","ASGD","SGD","RAdam","Rprop","RMSprop","NAdam"])
+    pie_config["clip_norm"] = t["clip_norm"]
+    pie_config["lr"] = t["lr"]
+    pie_config["lr_factor"] = t["lr_factor"]
+    pie_config["min_lr"] = t["min_lr"]
+    pie_config["lr_patience"] = to_int(t["lr_patience"])
+    pie_config["wemb_dim"] = to_int(t["wemb_dim"])
+    pie_config["cemb_dim"] = to_int(t["cemb_dim"])
+    pie_config["cemb_type"] = to_choice(t["cemb_type"], ["rnn", "cnn"])
+    pie_config["custom_cemb_cell"] = to_bool(t["custom_cemb_cell"])
+    pie_config["cemb_layers"] = to_int(t["cemb_layers"])
+    pie_config["scorer"] = to_choice(t["scorer"], ["general", "dot", "bahdanau"])
+    pie_config["linear_layers"] = to_int(t["linear_layers"])
+    pie_config["hidden_size"] = to_int(t["hidden_size"])
+    pie_config["num_layers"] = to_int(t["num_layers"])
+    pie_config["cell"] = to_choice(t["cell"], ["LSTM", "GRU"])
+    pie_config["init_rnn"] = to_choice(t["init_rnn"], ["xavier_uniform", "orthogonal"])
     return pie_config
 
 
-def multi_choice(value, options):
+def to_choice(value, options):
     return options[math.floor(value)]
 
 
-def pie_int(value):
+def to_int(value):
     return math.floor(value)
 
-def pie_bool(value):
+
+def to_bool(value):
     return bool(math.floor(value))
+
 
 def get_bounds():
     return {  # Note, for bool, choice and int, add 1 to the upper bound
-        "init_rnn": (0, 2),  # choice
-        "cell": (0, 2),  # choice
-        "scorer": (0, 3),  # choice
-        "hidden_size": (10, 500),
-        "num_layers": (1, 4),  # int
-        "linear_layers": (1, 4),  # int
+        "include_lm": (0, 2),  # bool
+        "lm_shared_softmax": (0, 2),  # bool
+
+        "lm_patience": (1,5), # int
+        "lm_factor": (0,1), # float
+        "lm_weight": (0,1), # float
+
+        "batch_size": (10,100), # int
+        "pretrain_embeddings": (0, 2),  # bool
+        "freeze_embeddings": (0, 2),  # bool
+        "dropout": (0, 1),  # float
+        "word_dropout": (0, 1),  # float
+        "optimizer": (0, 11),  # choice
+        "clip_norm": (0, 10),  # float
+        "lr": (0, 0.1),  # float
+        "lr_factor": (0, 1),  # float
+        "min_lr": (0, 0.0001),  # float
+        "lr_patience": (0, 5),  # int
+        "wemb_dim": (50, 500),  # int
+        "cemb_dim": (50, 500),  # int
+        "cemb_type": (0, 2),  # choice
+        "custom_cemb_cell": (0, 2),  # bool
         "cemb_layers": (1, 5),  # int
+        "scorer": (0, 3),  # choice
+        "linear_layers": (1, 4),  # int
+        "hidden_size": (10, 500),  # int
+        "num_layers": (1, 4),  # int
+        "cell": (0, 2),  # choice
+        "init_rnn": (0, 2),  # choice
     }
 
 

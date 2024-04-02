@@ -288,7 +288,7 @@ class Trainer(object):
             print(self.lr_scheduler)
             print()
 
-        return dev_scores
+        return dev_scores, dev_loss
 
     def train_epoch(self, devset, epoch):
         rep_loss = collections.defaultdict(float)
@@ -330,12 +330,12 @@ class Trainer(object):
             if self.check_freq > 0 and b > 0 and b % self.check_freq == 0:
                 if devset is not None:
                     rep_start = time.time()
-                    scores = self.run_check(devset)
+                    scores, dev_loss = self.run_check(devset)
                     logger.info("Evaluation time: {:.0f} sec".format(
                         time.time() - rep_start))
                     rep_start = time.time()
 
-        return scores
+        return scores, dev_loss
 
     def train_epochs(self, epochs, devset=None):
         """
@@ -349,7 +349,7 @@ class Trainer(object):
                 # train epoch
                 epoch_start = time.time()
                 logger.info("Starting epoch [{}]".format(epoch))
-                self.train_epoch(devset, epoch)
+                scores, dev_loss = self.train_epoch(devset, epoch)
                 epoch_total = time.time() - epoch_start
                 logger.info("Finished epoch [{}] in [{:.0f}] secs".format(
                     epoch, epoch_total))
@@ -364,4 +364,4 @@ class Trainer(object):
         logger.info("Finished training in [{:.0f}] secs".format(time.time() - start))
 
         # will be None if no dev test was provided or the model failed to converge
-        return scores
+        return scores, dev_loss
