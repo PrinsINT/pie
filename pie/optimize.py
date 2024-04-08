@@ -4,6 +4,7 @@ import random
 import json
 import time
 from typing import Any
+import traceback
 
 import yaml
 from json_minify import json_minify
@@ -16,6 +17,11 @@ utility = UtilityFunction(kind="ucb", kappa=2.5, xi=0.0)
 from pie import utils
 from pie.settings import settings_from_file, check_settings, merge_task_defaults
 from pie.settings import Settings
+
+# global flushing
+import functools
+
+print = functools.partial(print, flush=True)
 
 
 # available distributions
@@ -163,7 +169,7 @@ def bayesian_hyperband(train_fn, settings, opt, kwargs, R=81, eta=3):
         # successive halving
         for i in range(s + 1):
             n_i = math.floor(n * (eta ** (-i))) if i == 0 else len(T)
-            r_i = r * (eta**i) if i == 0 else math.ceil(R/n_i)
+            r_i = r * (eta**i) if i == 0 else math.ceil(R / n_i)
             L: list[float] = []
 
             # 1st iter: we initialize the configurations
@@ -202,7 +208,9 @@ def top_k(T, L, n, loss_threshold) -> tuple[list[float], list[dict], float]:
     ][:n]
     print(f"+++ Keeping {n} configurations +++")
     # filter out the pairs that are below the average threshold
-    loss_threshold = (loss_threshold + max(L))/2 if loss_threshold != 0 else max(L)+min(L)/2
+    loss_threshold = (
+        (loss_threshold + max(L)) / 2 if loss_threshold != 0 else max(L) + min(L) / 2
+    )
     print(f"+++ Loss threshold: {loss_threshold} +++")
     good_pairs = [pair for pair in sorted_pairs if pair[0] >= loss_threshold]
     print(f"+++ Keeping best {len(good_pairs)} configurations +++")
@@ -224,7 +232,7 @@ def single_run(t, r_i, train_fn, settings, opt, kwargs) -> float:
         final_score = -loss["lemma"]  # negative because we want to maximize
         return final_score
     except Exception as e:
-        print(f"+++ Exception in single_run: {e} +++")
+        print(f"+++ Exception in single_run: {e} +++\n{traceback.format_exc()}")
         return 0
 
 
@@ -236,8 +244,8 @@ def to_pie_config(t):
 
     pie_config["lm_schedule"] = {}
     pie_config["lm_schedule"]["patience"] = to_int(t["lm_patience"])
-    pie_config["lm_schedule"]["factor"] = to_int(t["lm_factor"])
-    pie_config["lm_schedule"]["weight"] = to_int(t["lm_weight"])
+    pie_config["lm_schedule"]["factor"] = t["lm_factor"]
+    pie_config["lm_schedule"]["weight"] = t["lm_weight"]
 
     pie_config["batch_size"] = to_int(t["batch_size"])
     pie_config["pretrain_embeddings"] = to_bool(t["pretrain_embeddings"])
@@ -281,11 +289,11 @@ def get_bounds():
         "include_lm": (0, 2),  # bool
         "lm_shared_softmax": (0, 2),  # bool
 
-        "lm_patience": (1,5), # int
-        "lm_factor": (0,1), # float
-        "lm_weight": (0,1), # float
+        "lm_patience": (1, 5),  # int
+        "lm_factor": (0, 1),  # float
+        "lm_weight": (0, 1),  # float
 
-        "batch_size": (10,100), # int
+        "batch_size": (10, 100),  # int
         "pretrain_embeddings": (0, 2),  # bool
         "freeze_embeddings": (0, 2),  # bool
         "dropout": (0, 1),  # float
