@@ -171,11 +171,11 @@ def run(settings):
         _, loss = trainer.train_epochs(settings.epochs, devset=devset)
     except KeyboardInterrupt:
         print("Stopping training")
-    finally:
-        model.eval()
+        
     running_time = time.time() - running_time
 
     if settings.test_path:
+        model.eval()
         print("Evaluating model on test set")
         testset = Dataset(settings, Reader(settings, settings.test_path), label_encoder)
         for task in model.evaluate(testset, trainset).values():
@@ -187,25 +187,25 @@ def run(settings):
         fpath = model.save(fpath, infix=infix, settings=settings)
         print("Saved best model to: [{}]".format(fpath))
 
-    scoring = []
-    if devset is not None and not settings.run_test:
-        scorers = model.evaluate(devset, trainset)
-        scores = []
-        for task in sorted(scorers):
-            scorer = scorers[task]
-            result = scorer.get_scores()
-            scoring.append(result)
-            for acc in result:
-                scores.append('{}-{}:{:.6f}'.format(
-                    acc, task, result[acc]['accuracy']))
-                scores.append('{}-{}-support:{}'.format(
-                    acc, task, result[acc]['support']))
-        path = '{}.results.{}.csv'.format(
-            settings.modelname, '-'.join(get_targets(settings)))
-        with open(path, 'a') as f:
-            line = [infix, str(seed), str(running_time)]
-            line += scores
-            f.write('{}\n'.format('\t'.join(line)))
+    if False: # might have to add something like settings.create_csv
+        model.eval()
+        if devset is not None and not settings.run_test:
+            scorers = model.evaluate(devset, trainset)
+            scores = []
+            for task in sorted(scorers):
+                scorer = scorers[task]
+                result = scorer.get_scores()
+                for acc in result:
+                    scores.append('{}-{}:{:.6f}'.format(
+                        acc, task, result[acc]['accuracy']))
+                    scores.append('{}-{}-support:{}'.format(
+                        acc, task, result[acc]['support']))
+            path = '{}.results.{}.csv'.format(
+                settings.modelname, '-'.join(get_targets(settings)))
+            with open(path, 'a') as f:
+                line = [infix, str(seed), str(running_time)]
+                line += scores
+                f.write('{}\n'.format('\t'.join(line)))
 
     print("Bye!")
     return (fpath, loss)
