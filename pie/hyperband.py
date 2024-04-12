@@ -14,19 +14,23 @@ from typing import Callable
 import uuid
 import math
 import traceback
+import random
+import functools
 
 # Third-party
 from bayes_opt import BayesianOptimization, UtilityFunction
 
 # Local
 from pie import utils
-from pie.settings import settings_from_file, check_settings, merge_task_defaults
+from pie.settings import check_settings, merge_task_defaults
 from pie.settings import Settings
 
 utility = UtilityFunction(kind="ucb", kappa=2.5, xi=0.0)
 
 # We can't use -inf as a threshold, because the GP can't handle it.
 INFINITY = -100
+
+print = functools.partial(print, flush=True)
 
 
 class PieSpace:
@@ -160,17 +164,18 @@ class BOHB:
         self.total_budget = (self.num_brackets + 1) * max_indiv_budget
         self.best_candidate: Candidate = None  # type: ignore
         self.candidates: list[Candidate] = []
-        self.bayes = BayesianOptimization(
+        self.history: dict[str, Candidate] = {}
+        self.random_bayes = BayesianOptimization(
             f=None,
             pbounds=PieSpace.get_bounds(),
             verbose=2,
-            random_state=1,
-            allow_duplicate_points=True,
         )
         self.loss_threshold = INFINITY
         self.settings = settings
         self.train_fn = train_fn
         self.kwargs = kwargs
+        # Number of dimensions kept in dropout bayes
+        self.dropout_dims = 9
 
     def run(self):
         # the hyperband convention is to go reverse.
@@ -265,9 +270,11 @@ class BOHB:
                 self.register(c)
 
     def new_candidate(self):
-        config = self.bayes.suggest(utility)
-        # print(f"+++ Raw suggested config: {config} +++")
-        # print(f"+++ Pie suggested config: {PieSpace.to_pie_config(config)} +++")
+        config = {}
+        if not self.history:
+            config = self.random_bayes.suggest(utility)
+        else:
+            config = self.dropout_bayes()
         c = Candidate(
             bayes_config=config,
             settings=self.settings,
@@ -277,9 +284,37 @@ class BOHB:
         self.candidates.append(c)
         return c
 
+    def dropout_bayes(self) -> dict:
+        if random.random() < 0.1:
+            return self.random_bayes.suggest(utility)
+        # choose self.dropout_dims random dimensions
+        bounds = PieSpace.get_bounds()
+        dims: dict = {
+            k: bounds[k] for k in random.sample(bounds.keys(), self.dropout_dims)
+        }
+        bayes = BayesianOptimization(
+            f=None,
+            pbounds=dims,
+            allow_duplicate_points=True,
+        )
+        # register history
+        for v in self.history.values():
+            # only register the dimensions that are in the dropout
+            dims_history = {k: v.bayes_config[k] for k in dims}
+            bayes.register(
+                params=dims_history,
+                target=v.loss,
+            )
+        dropout_suggestion = bayes.suggest(utility)
+        # fill in the missing dimensions using self.best_candidate
+        result = self.best_candidate.bayes_config
+        for k in dims:
+            result[k] = dropout_suggestion[k]
+        return result
+
     def register(self, candidate: "Candidate"):
         print(f"+++ Registering score {candidate.loss} +++")
-        self.bayes.register(params=candidate.bayes_config, target=candidate.loss)
+        self.history[candidate.id] = candidate
 
     def is_very_first_halving(self):
         return self.halving == 0 and self.bracket == self.num_brackets
@@ -335,13 +370,15 @@ class Candidate:
         self.existing_model_path = ""
         self.epochs_trained = 0
         self.kwargs = kwargs
+        self.id = str(uuid.uuid4())
 
     def run(self, epochs) -> None:
         try:
             self.set_pie_config(epochs)
-            self.existing_model_path, self.loss = self.train_fn(
+            self.existing_model_path, pie_loss = self.train_fn(
                 check_settings(merge_task_defaults(self.pie_config)), **self.kwargs
             )
+            self.loss = -pie_loss["lemma"]
             self.pie_config["existing_model"] = self.existing_model_path
         except Exception as e:
             print(f"+++ Exception in single_run: {e} +++\n{traceback.format_exc()}")
@@ -366,12 +403,11 @@ class Candidate:
         """
         Write the used parameters, resulting loss value and uuid of this model to disk.
         """
-        id = str(uuid.uuid4())
         self.pie_config["loss"] = self.loss
-        self.pie_config["config_uuid"] = id
+        self.pie_config["config_uuid"] = self.id
         self.pie_config["epochs"] = self.epochs_trained
         json_path = os.path.join(
-            self.pie_config["modelpath"], f"hyperparameters-{id}.json"
+            self.pie_config["modelpath"], f"hyperparameters-{self.id}.json"
         )
         with open(json_path, "w+") as f:
             json.dump(self.pie_config, f)
