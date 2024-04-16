@@ -390,7 +390,7 @@ class Candidate:
             self.existing_model_path, pie_loss = self.train_fn(
                 check_settings(merge_task_defaults(self.pie_config)), **self.kwargs
             )
-            self.loss = -pie_loss["lemma"]
+            self.loss = -(pie_loss["lemma"] + pie_loss["pos"])
             self.pie_config["existing_model"] = self.existing_model_path
         except Exception as e:
             print(f"+++ Exception in single_run: {e} +++\n{traceback.format_exc()}")
