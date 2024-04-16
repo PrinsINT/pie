@@ -148,6 +148,7 @@ def run_optimize(train_fn, settings, opt, n_iter, **kwargs):
         3,
         enable_bayes_dropout=False,
         gp_opt_only=True,
+        warm_start=True,
         kwargs=kwargs,
     )
     bohb.run()
