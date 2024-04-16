@@ -36,7 +36,7 @@ print = functools.partial(print, flush=True)
 
 class PieSpace:
     """
-    We used the bayes_opt library to generate configurations in the hyperparameter space.
+    We use the bayes_opt library to generate configurations in the hyperparameter space.
     Bayes_opt only support floats, so we need to convert them so Pie understands them.
     Bayes_opt however works with an inclusive range: asking for range (0, 1) can genuinely generate 0 or 1.
     We would have needed to convert them anyway, because Pie can have nested dictionary hyperparameters (e.g. lm_schedule).
@@ -157,7 +157,16 @@ class PieSpace:
 
 
 class BOHB:
-    def __init__(self, train_fn, settings, max_indiv_budget: int, eta, enable_bayes_dropout, kwargs):
+    def __init__(
+        self,
+        train_fn,
+        settings,
+        max_indiv_budget: int,
+        eta,
+        enable_bayes_dropout,
+        gp_opt_only,
+        kwargs,
+    ):
         self.eta = eta
         self.num_brackets = math.floor(math.log(max_indiv_budget, eta))
         # convert individual budget to total bracket budget
@@ -181,6 +190,7 @@ class BOHB:
         self.train_fn = train_fn
         self.kwargs = kwargs
         self.enable_bayes_dropout = enable_bayes_dropout
+        self.gp_opt_only = gp_opt_only
         # Number of dimensions kept in dropout bayes
         self.dropout_dims = 9
 
@@ -223,6 +233,9 @@ class BOHB:
                     f"+++ Top candidate of bracket {bracket} was not the best: {self.candidates[0].loss}"
                 )
                 self.candidates[0].delete()
+
+            if self.gp_opt_only:
+                break
 
         # final best
         self.best_candidate.save_metadata()
@@ -328,7 +341,13 @@ class BOHB:
                 target=candidate.loss,
             )
 
+    # Used to determine whether to register the random configs in the GP, while still in the first halving.
+    # Registering them means GP suggestions won't be random anymore.
     def is_very_first_halving(self):
+        # Do register them when GP-optimizing.
+        if self.gp_opt_only:
+            return False
+
         return self.halving == 0 and self.bracket == self.num_brackets
 
     def avg_loss(self) -> float:
@@ -336,6 +355,8 @@ class BOHB:
         return sum(losses) / len(losses)
 
     def top_k(self, k) -> None:
+        if self.gp_opt_only:
+            k = 1
         self.loss_threshold = self.avg_loss()
         to_be_deleted = []
 
@@ -415,6 +436,8 @@ class Candidate:
         self.save_metadata()
         if os.path.exists(self.existing_model_path):
             os.remove(self.existing_model_path)
+        else:
+            print(f"+++ The file {self.existing_model_path} does not exist +++")
 
     def save_metadata(self) -> None:
         """
