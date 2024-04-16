@@ -2,9 +2,10 @@
 Implements Bayesian Optimization Hyperband (BOHB) for PIE.
 
 Sources:
-https://arxiv.org/pdf/1801.01596.pdf
-https://arxiv.org/pdf/1603.06560.pdf
-https://medium.com/@sabrinaherbst/automl-with-successive-halfing-and-hyperband-e130a05dded9
+Hyperband: https://arxiv.org/pdf/1603.06560.pdf
+BOHB: https://arxiv.org/pdf/1801.01596.pdf
+Bayesian dropout: https://arxiv.org/ftp/arxiv/papers/1802/1802.05400.pdf
+Threshold: https://ijai.iaescore.com/index.php/IJAI/article/view/24324
 """
 
 # Standard library
@@ -156,7 +157,7 @@ class PieSpace:
 
 
 class BOHB:
-    def __init__(self, train_fn, settings, max_indiv_budget: int, eta, kwargs):
+    def __init__(self, train_fn, settings, max_indiv_budget: int, eta, enable_bayes_dropout, kwargs):
         self.eta = eta
         self.num_brackets = math.floor(math.log(max_indiv_budget, eta))
         # convert individual budget to total bracket budget
@@ -170,10 +171,16 @@ class BOHB:
             pbounds=PieSpace.get_bounds(),
             verbose=2,
         )
+        self.bayes = BayesianOptimization(
+            f=None,
+            pbounds=PieSpace.get_bounds(),
+            allow_duplicate_points=True,
+        )
         self.loss_threshold = INFINITY
         self.settings = settings
         self.train_fn = train_fn
         self.kwargs = kwargs
+        self.enable_bayes_dropout = enable_bayes_dropout
         # Number of dimensions kept in dropout bayes
         self.dropout_dims = 9
 
@@ -274,7 +281,7 @@ class BOHB:
         if not self.history:
             config = self.random_bayes.suggest(utility)
         else:
-            config = self.dropout_bayes()
+            config = self.dropout_bayes() if self.enable_bayes_dropout else self.bayes.suggest(utility)
         c = Candidate(
             bayes_config=config,
             settings=self.settings,
@@ -315,6 +322,11 @@ class BOHB:
     def register(self, candidate: "Candidate"):
         print(f"+++ Registering score {candidate.loss} +++")
         self.history[candidate.id] = candidate
+        if not self.enable_bayes_dropout:
+            self.bayes.register(
+                params=candidate.bayes_config,
+                target=candidate.loss,
+            )
 
     def is_very_first_halving(self):
         return self.halving == 0 and self.bracket == self.num_brackets

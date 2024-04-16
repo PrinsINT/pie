@@ -141,7 +141,7 @@ def run_optimize(train_fn, settings, opt, n_iter, **kwargs):
 
     - n_iter: int, number of iterations to run
     """
-    bohb = BOHB(train_fn, settings, 9, 3, kwargs)
+    bohb = BOHB(train_fn, settings, 9, 3, enable_bayes_dropout=False, kwargs=kwargs)
     bohb.run()
 
 
