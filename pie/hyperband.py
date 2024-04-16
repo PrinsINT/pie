@@ -390,7 +390,12 @@ class Candidate:
             self.existing_model_path, pie_loss = self.train_fn(
                 check_settings(merge_task_defaults(self.pie_config)), **self.kwargs
             )
+
+            # minus because we want to maximize
             self.loss = -(pie_loss["lemma"] + pie_loss["pos"])
+            if math.isnan(self.loss):  # Yes, this does occur for some reason
+                self.loss = INFINITY
+
             self.pie_config["existing_model"] = self.existing_model_path
         except Exception as e:
             print(f"+++ Exception in single_run: {e} +++\n{traceback.format_exc()}")
