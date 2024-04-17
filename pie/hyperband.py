@@ -305,8 +305,10 @@ class BOHB:
 
     def new_candidate(self):
         if self.warm_start:
-            self.warm_candidate()
-            self.warm_start = True
+            c = self.warm_candidate()
+            self.candidates.append(c)
+            self.warm_start = False
+            return c
 
         config = {}
         if not self.history:
@@ -339,7 +341,7 @@ class BOHB:
             "freeze_embeddings": int(False),
             "dropout": 0.25,
             "word_dropout": 0,
-            "optimizer": 2,  # "Adam",
+            "optimizer": 2.5,  # "Adam",
             "clip_norm": 5,
             "lr": 0.001,
             "lr_factor": 0.75,
@@ -347,15 +349,15 @@ class BOHB:
             "lr_patience": 2,
             "wemb_dim": 0,
             "cemb_dim": 300,
-            "cemb_type": 0,  # "rnn"
+            "cemb_type": 0.5,  # "rnn"
             "custom_cemb_cell": int(False),
             "cemb_layers": 2,
-            "scorer": 0,  # "general",
+            "scorer": 0.5,  # "general",
             "linear_layers": 1,
             "hidden_size": 150,
             "num_layers": 1,
-            "cell": 2,  # "GRU",
-            "init_rnn": 0,  # "default",
+            "cell": 1.5,  # "GRU",
+            "init_rnn": 0.5,  # "default",
         }
         return Candidate(
             bayes_config=config,
@@ -387,7 +389,11 @@ class BOHB:
             )
         dropout_suggestion = bayes.suggest(utility)
         # fill in the missing dimensions using self.best_candidate
-        result = self.best_candidate.bayes_config
+        result = (
+            self.best_candidate.bayes_config
+            if self.best_candidate
+            else self.random_bayes.suggest(utility)
+        )
         for k in dims:
             result[k] = dropout_suggestion[k]
         return result
