@@ -21,9 +21,13 @@ def regexsplitter(regex):
     return func
 
 
-SECTION = r'([A-Z\. ]+\.)'
-FULLSTOP = r'([^\.]+\.)'
-WORD = r'([{}])'.format(string.punctuation.replace("-", "").replace("'", "").replace("[", "").replace("]", ""))
+SECTION = r"([A-Z\. ]+\.)"
+FULLSTOP = r"(.+?[\.!?])(?=[^0-9])"
+# Never split on [ ] ' - as these can occur in words: 't, [ge]zien, ge-zien
+PUNCTS = re.sub(r"[\[\]'-]", "", string.punctuation)
+# Addionally, keep any type of punctuation within a word in tact (e.g. €1.000,50)
+WORD = r"((?<!\S)[{}]|[{}](?!\S))".format(PUNCTS, PUNCTS)
+
 
 # Even the tokenizer needs to adhere to the max_sent_len, 
 # as it can cause out of memory errors.
